@@ -67,7 +67,7 @@ function isNegative(title) {
 // ─── Gemini helpers ───────────────────────────────────────────────────────────
 async function geminiCall(prompt, maxTokens = 10) {
   const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${GEMINI_KEY}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/${maxTokens > 20 ? 'gemini-2.5-flash-lite' : 'gemini-flash-latest'}:generateContent?key=${GEMINI_KEY}`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

@@ -1,6 +1,9 @@
 // Happyhappyhappy — Positive news for Aditya & Shweta
 // Cloudflare Worker: serves inline HTML + REST API + cron ingestion + reader mode
 
+import { parseHTML } from 'linkedom';
+import { Readability } from '@mozilla/readability';
+
 export interface Env {
   DB: D1Database;
   ASSETS: Fetcher;
@@ -8,6 +11,11 @@ export interface Env {
   RESEND_API_KEY: string;
   ADMIN_TOKEN?: string;
 }
+
+// Model routing: use lite for scoring/category (cheap), better model for summaries
+const GEMINI_SCORE_MODEL = 'gemini-flash-latest';
+const GEMINI_SUMMARY_MODEL = 'gemini-2.5-flash-lite';
+const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 
 interface Item {
   id: string;
@@ -41,88 +49,83 @@ function isNegative(title: string): boolean {
 }
 
 // ─── Gemini LLM helpers ───────────────────────────────────────────────────────
-async function geminiScore(title: string, snippet: string, apiKey: string): Promise<number> {
-  const prompt = `Rate how uplifting, positive, and joyful this news story is on a scale of 1-10.
-1 = very negative/sad, 5 = neutral, 10 = extremely uplifting and heartwarming.
-Only reply with a single integer.
+type GeminiResponse = { candidates?: Array<{ finishReason?: string; content?: { parts?: Array<{ text?: string }> } }> };
 
-Title: ${title}
-Snippet: ${snippet.slice(0, 300)}`;
-
+async function geminiCall(model: string, prompt: string, apiKey: string, maxTokens: number, temp = 0): Promise<string> {
   try {
     const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${apiKey}`,
+      `${GEMINI_BASE}/${model}:generateContent?key=${apiKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { maxOutputTokens: 5, temperature: 0 }
+          generationConfig: { maxOutputTokens: maxTokens, temperature: temp }
         })
       }
     );
-    const data = await res.json() as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
-    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? '0';
-    const score = parseInt(text, 10);
-    return isNaN(score) ? 0 : Math.min(10, Math.max(0, score));
-  } catch {
-    return 0;
-  }
-}
-
-async function geminiSummarize(title: string, content: string, apiKey: string): Promise<string> {
-  const prompt = `Write a warm, uplifting 4-5 sentence summary of this positive news story.
-Write in a joyful, human, conversational tone. Highlight what makes this story special and why it matters.
-Include specific details that bring it to life. End with something hopeful or inspiring.
-No clichés, no filler phrases like "In conclusion" or "Overall".
-
-Title: ${title}
-Content: ${content.slice(0, 1200)}`;
-
-  try {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { maxOutputTokens: 350, temperature: 0.7 }
-        })
-      }
-    );
-    const data = await res.json() as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
+    const data = await res.json() as GeminiResponse;
     return data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? '';
   } catch {
     return '';
   }
 }
 
+async function geminiScore(title: string, snippet: string, apiKey: string): Promise<number> {
+  const text = await geminiCall(
+    GEMINI_SCORE_MODEL,
+    `Rate how uplifting, positive, and joyful this news story is on a scale of 1-10.
+1 = very negative/sad, 5 = neutral, 10 = extremely uplifting and heartwarming.
+Only reply with a single integer.
+
+Title: ${title}
+Snippet: ${snippet.slice(0, 300)}`,
+    apiKey, 5, 0
+  );
+  const score = parseInt(text, 10);
+  return isNaN(score) ? 0 : Math.min(10, Math.max(0, score));
+}
+
+async function geminiSummarize(title: string, content: string, apiKey: string): Promise<string> {
+  // Use gemini-2.5-flash-lite: reliably generates complete 4-5 sentence summaries
+  return geminiCall(
+    GEMINI_SUMMARY_MODEL,
+    `Write a warm, uplifting 4-5 sentence summary of this positive news story.
+Write in a joyful, human, conversational tone. Highlight what makes this story special and why it matters.
+Include specific details that bring it to life. End with something hopeful or inspiring.
+No clichés, no filler phrases like "In conclusion" or "Overall". Output only the summary text.
+
+Title: ${title}
+Content: ${content.slice(0, 2000)}`,
+    apiKey, 400, 0.7
+  );
+}
+
+async function geminiSummarizeArticle(title: string, content: string, apiKey: string): Promise<string> {
+  // For reader mode: concise 2-3 sentence summary of full fetched article content
+  return geminiCall(
+    GEMINI_SUMMARY_MODEL,
+    `Write a concise 2-3 sentence summary of this article for a reader preview.
+Be specific, warm, and self-contained. Use plain sentences, no markdown.
+Output only the summary text.
+
+Title: ${title}
+Article: ${content.slice(0, 4000)}`,
+    apiKey, 200, 0.5
+  );
+}
+
 async function geminiCategory(title: string, apiKey: string): Promise<string> {
-  const prompt = `Classify this news story into exactly one category. Reply with only the category name.
+  const raw = await geminiCall(
+    GEMINI_SCORE_MODEL,
+    `Classify this news story into exactly one category. Reply with only the category name.
 Categories: feel-good, science, animals, arts
 
-Title: ${title}`;
-
-  try {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { maxOutputTokens: 10, temperature: 0 }
-        })
-      }
-    );
-    const data = await res.json() as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
-    const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim().toLowerCase() ?? '';
-    if (['feel-good', 'science', 'animals', 'arts'].includes(raw)) return raw;
-    return 'feel-good';
-  } catch {
-    return 'feel-good';
-  }
+Title: ${title}`,
+    apiKey, 10, 0
+  );
+  const clean = raw.toLowerCase().replace(/[^a-z-]/g, '');
+  return ['feel-good', 'science', 'animals', 'arts'].includes(clean) ? clean : 'feel-good';
 }
 
 // ─── RSS ingestion helpers ────────────────────────────────────────────────────
@@ -295,51 +298,203 @@ async function buildDailyDigest(env: Env): Promise<void> {
   await env.DB.prepare('INSERT OR REPLACE INTO digest_days (date, item_ids) VALUES (?, ?)').bind(today, itemIds).run();
 }
 
-// ─── Reader mode ──────────────────────────────────────────────────────────────
-async function fetchArticleContent(articleUrl: string): Promise<{ title: string; content: string; byline: string }> {
-  // Try Jina reader API for clean article extraction
+// ─── Reader mode — Musely-style Readability + Jina fallback ──────────────────
+
+function cleanupArticleText(value: string, maxLength = 32000): string {
+  const cleaned = String(value ?? '')
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&ldquo;|&rdquo;/gi, '"')
+    .replace(/&lsquo;|&rsquo;/gi, "'")
+    .replace(/&ndash;/gi, '-')
+    .replace(/&mdash;/gi, '-')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/https?:\/\/\S+/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!cleaned) return '';
+  return cleaned.length <= maxLength ? cleaned : cleaned.slice(0, maxLength).replace(/[\s,;:.-]+$/, '') + '…';
+}
+
+function extractWithReadability(htmlSource: string): { title: string; content: string; excerpt: string } | null {
   try {
-    const jinaRes = await fetch(`https://r.jina.ai/${articleUrl}`, {
-      headers: {
-        'Accept': 'application/json',
-        'X-Return-Format': 'markdown'
-      },
-      signal: AbortSignal.timeout(10000)
+    const { document } = parseHTML(htmlSource);
+    document.querySelectorAll('script,style,noscript,iframe,header,footer,nav,aside,form').forEach((node: Element) => node.remove());
+    const article = new Readability(document as unknown as Document, {
+      charThreshold: 220,
+      keepClasses: false,
+      nbTopCandidates: 7,
+      disableJSONLD: true,
+    }).parse();
+    if (!article) return null;
+    const textContent = cleanupArticleText(article.textContent || article.content || '');
+    if (!textContent || textContent.length < 280) return null;
+    const excerpt = textContent.match(/^(.{60,320}?[.!?])(\s|$)/)?.[1] || textContent.slice(0, 280);
+    return {
+      title: String(article.title || '').trim(),
+      content: textContent,
+      excerpt: excerpt.replace(/[\s,;:.-]+$/, ''),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function extractWithPatterns(htmlSource: string): string {
+  const contentPatterns = [
+    /<article[^>]*>([\s\S]*?)<\/article>/i,
+    /<main[^>]*>([\s\S]*?)<\/main>/i,
+    /<div[^>]*class=["'][^"']*(?:article|post)[^"']*(?:body|content)[^"']*["'][^>]*>([\s\S]*?)<\/div>/i,
+    /<div[^>]*id=["'][^"']*(?:article|content|main)[^"']*["'][^>]*>([\s\S]*?)<\/div>/i,
+  ];
+  for (const pattern of contentPatterns) {
+    const match = pattern.exec(htmlSource);
+    const content = cleanupArticleText(match?.[1] || '');
+    if (content.length >= 220) return content;
+  }
+  const bodyMatch = /<body[^>]*>([\s\S]*?)<\/body>/i.exec(htmlSource);
+  return cleanupArticleText(bodyMatch?.[1] || '');
+}
+
+async function extractFromJina(targetUrl: string): Promise<string> {
+  try {
+    const stripped = targetUrl.replace(/^https?:\/\//i, '');
+    if (!stripped) return '';
+    const resp = await fetch('https://r.jina.ai/http://' + stripped, {
+      headers: { 'accept': 'text/plain' },
+      signal: AbortSignal.timeout(12000)
     });
-    if (jinaRes.ok) {
-      const data = await jinaRes.json() as { data?: { title?: string; content?: string; description?: string } };
-      if (data?.data?.content) {
-        return {
-          title: data.data.title ?? '',
-          content: data.data.content,
-          byline: ''
-        };
+    if (!resp.ok) return '';
+    const raw = await resp.text();
+    const cleaned = raw
+      .replace(/^Title:\s.*$/gim, ' ')
+      .replace(/^URL Source:\s.*$/gim, ' ')
+      .replace(/^Published Time:\s.*$/gim, ' ')
+      .replace(/^Author:\s.*$/gim, ' ')
+      .replace(/^Markdown Content:\s*/gim, ' ')
+      .replace(/^={2,}\s*$/gim, ' ')
+      .replace(/^\s*[-*]\s*(Share|Tweet|Follow|Subscribe).+$/gim, ' ')
+      .replace(/\b(?:Read more|Subscribe now|Sign up)\b.+$/gim, ' ')
+      .trim();
+    return cleanupArticleText(cleaned, 36000);
+  } catch {
+    return '';
+  }
+}
+
+async function handleArticle(req: Request, env: Env): Promise<Response> {
+  const url = new URL(req.url);
+  const articleUrl = url.searchParams.get('url');
+  if (!articleUrl) return Response.json({ error: 'url parameter required' }, { status: 400 });
+
+  let normalizedUrl: string;
+  try {
+    const parsed = new URL(articleUrl);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return Response.json({ error: 'unsupported url protocol' }, { status: 400 });
+    }
+    normalizedUrl = parsed.toString();
+  } catch {
+    return Response.json({ error: 'invalid article url' }, { status: 400 });
+  }
+
+  // Fallback: return summary from DB if we can't fetch the article
+  const fallbackFromDB = async (reason: string) => {
+    const row = await env.DB.prepare('SELECT title, source, summary FROM items WHERE url = ? LIMIT 1')
+      .bind(normalizedUrl).first<{ title: string; source: string; summary: string }>();
+    return Response.json({
+      ok: true,
+      title: row?.title || '',
+      content: row?.summary || '',
+      excerpt: row?.summary || '',
+      summary: row?.summary || '',
+      url: normalizedUrl,
+      fallback: true,
+      reason
+    });
+  };
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 12000);
+    let response: Response | null = null;
+    try {
+      response = await fetch(normalizedUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml',
+        },
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    // If direct fetch failed, try Jina
+    if (!response || !response.ok) {
+      const jinaContent = await extractFromJina(normalizedUrl);
+      if (jinaContent && jinaContent.length >= 120) {
+        const aiSummary = await geminiSummarizeArticle('', jinaContent, env.GEMINI_API_KEY);
+        return Response.json({
+          ok: true, title: '', content: jinaContent,
+          excerpt: aiSummary || jinaContent.slice(0, 300),
+          summary: aiSummary || jinaContent.slice(0, 300),
+          url: normalizedUrl
+        });
+      }
+      return fallbackFromDB('fetch_failed');
+    }
+
+    const htmlText = await response.text();
+    const titleMatch = /<title[^>]*>([^<]+)<\/title>/i.exec(htmlText);
+    const pageTitle = titleMatch?.[1]?.trim() || '';
+
+    // Try Readability first (best quality)
+    const readability = extractWithReadability(htmlText);
+    if (readability) {
+      const aiSummary = await geminiSummarizeArticle(readability.title || pageTitle, readability.content, env.GEMINI_API_KEY);
+      return Response.json({
+        ok: true,
+        title: readability.title || pageTitle,
+        content: readability.content,
+        excerpt: aiSummary || readability.excerpt,
+        summary: aiSummary || readability.excerpt,
+        url: normalizedUrl
+      });
+    }
+
+    // Pattern-based extraction
+    let content = extractWithPatterns(htmlText);
+    if (!content || content.length < 260) {
+      const jinaContent = await extractFromJina(normalizedUrl);
+      if (jinaContent && jinaContent.length > content.length) content = jinaContent;
+    }
+
+    if (!content || content.length < 120) return fallbackFromDB('extract_failed');
+
+    const aiSummary = await geminiSummarizeArticle(pageTitle, content, env.GEMINI_API_KEY);
+    return Response.json({
+      ok: true, title: pageTitle, content,
+      excerpt: aiSummary || content.slice(0, 300),
+      summary: aiSummary || content.slice(0, 300),
+      url: normalizedUrl
+    });
+
+  } catch (e) {
+    if ((e as Error)?.name === 'AbortError') {
+      const jinaContent = await extractFromJina(normalizedUrl);
+      if (jinaContent && jinaContent.length >= 120) {
+        return Response.json({ ok: true, title: '', content: jinaContent, excerpt: jinaContent.slice(0, 300), summary: jinaContent.slice(0, 300), url: normalizedUrl });
       }
     }
-  } catch { /* fall through */ }
-
-  // Fallback: fetch raw and strip HTML
-  try {
-    const rawRes = await fetch(articleUrl, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Happyhappyhappy/1.0)' },
-      signal: AbortSignal.timeout(10000)
-    });
-    if (rawRes.ok) {
-      const html = await rawRes.text();
-      const titleMatch = /<title[^>]*>([^<]+)<\/title>/i.exec(html);
-      const bodyMatch = /<body[^>]*>([\s\S]*?)<\/body>/i.exec(html);
-      const bodyText = bodyMatch
-        ? stripHTML(bodyMatch[1]).replace(/\s+/g, ' ').trim()
-        : '';
-      return {
-        title: titleMatch ? decodeHTMLEntities(titleMatch[1].trim()) : '',
-        content: bodyText.slice(0, 8000),
-        byline: ''
-      };
-    }
-  } catch { /* fall through */ }
-
-  return { title: '', content: '', byline: '' };
+    return fallbackFromDB('error');
+  }
 }
 
 function escapeHtml(s: string): string {
