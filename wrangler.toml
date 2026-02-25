@@ -1,0 +1,13 @@
+name = "happyhappyhappy"
+main = "src/index.ts"
+compatibility_date = "2026-02-25"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "happyhappyhappy"
+database_id = "c770fccd-dad1-4f39-9975-03224c530b34"
+
+[triggers]
+crons = ["0 * * * *", "0 16 * * *"]
+# 0 * * * * = hourly news ingestion
+# 0 16 * * * = 8am PT daily email digest

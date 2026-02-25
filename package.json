@@ -1,0 +1,23 @@
+{
+  "name": "happyhappyhappy",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "ingest": "node scripts/ingest.mjs",
+    "ingest:dry": "node scripts/ingest.mjs --dry-run",
+    "db:apply": "wrangler d1 execute happyhappyhappy --file=schema.sql",
+    "db:apply:remote": "wrangler d1 execute happyhappyhappy --remote --file=schema.sql"
+  },
+  "dependencies": {
+    "@mozilla/readability": "^0.6.0",
+    "linkedom": "^0.18.12"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250224.0",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0",
+    "wrangler": "^3.109.0"
+  }
+}
