@@ -753,7 +753,8 @@ function renderHTML(feedItems: Item[], todayItems: Item[], activeTab: string, ac
     /* ── Header ── */
     .header {
       background: var(--black);
-      padding: 14px 20px;
+      /* iOS safe area: pad top for status bar under notch/dynamic island */
+      padding: calc(14px + env(safe-area-inset-top)) 20px 14px;
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -768,38 +769,44 @@ function renderHTML(feedItems: Item[], todayItems: Item[], activeTab: string, ac
       align-items: center;
       gap: 10px;
       text-decoration: none;
+      min-width: 0;
     }
     .logo img {
-      width: 36px;
-      height: 36px;
+      width: 34px;
+      height: 34px;
       border-radius: 8px;
       flex-shrink: 0;
     }
     .logo-text {
       font-family: 'Fraunces', Georgia, serif;
-      font-size: 20px;
+      font-size: 19px;
       font-weight: 900;
       color: var(--lime);
       letter-spacing: -0.3px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     .nav {
       display: flex;
-      gap: 6px;
+      gap: 4px;
+      flex-shrink: 0;
     }
     .nav-btn {
-      padding: 8px 16px;
+      padding: 8px 18px;
       border-radius: 999px;
-      border: 2px solid transparent;
+      border: none;
       cursor: pointer;
       font-family: 'DM Sans', sans-serif;
       font-weight: 600;
       font-size: 14px;
       text-decoration: none;
-      color: #aaa;
+      color: rgba(255,255,255,0.55);
       background: transparent;
       transition: color 0.15s, background 0.15s;
       white-space: nowrap;
+      -webkit-tap-highlight-color: transparent;
     }
     .nav-btn:hover { color: var(--white); }
     .nav-btn.active {
@@ -1253,14 +1260,15 @@ function renderHTML(feedItems: Item[], todayItems: Item[], activeTab: string, ac
 
     /* ── Responsive ── */
     @media (max-width: 640px) {
-      .header { padding: 12px 16px; }
-      .logo-text { font-size: 17px; }
-      .nav-btn { padding: 7px 12px; font-size: 13px; }
-      .main { padding: 20px 16px 48px; }
+      /* On mobile, header safe-area is already handled by the base rule above */
+      .header { padding-left: 16px; padding-right: 16px; padding-bottom: 12px; }
+      .logo-text { font-size: 16px; }
+      .nav-btn { padding: 8px 14px; font-size: 13px; }
+      .main { padding: 20px 16px calc(48px + env(safe-area-inset-bottom)); }
       .hero-img { height: 200px; }
       .hero-body { padding: 20px 18px 16px; }
       .hero-foot { flex-direction: column; align-items: flex-start; gap: 10px; }
-      .reader-content { padding: 20px 18px 32px; }
+      .reader-content { padding: 20px 18px calc(32px + env(safe-area-inset-bottom)); }
       .reader-content h1 { font-size: 22px; }
       .reader-content p { font-size: 16px; }
     }
