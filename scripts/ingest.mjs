@@ -45,7 +45,9 @@ const SOURCES = [
   { name: 'Mental Floss', url: 'https://www.mentalfloss.com/rss.xml', region: 'us' },
   { name: 'Atlas Obscura', url: 'https://www.atlasobscura.com/feeds/latest', region: 'global' },
   { name: 'The Better India', url: 'https://www.thebetterindia.com/feed/', region: 'india' },
-  { name: 'Times of India', url: 'https://timesofindia.indiatimes.com/rssfeedstopstories.cms', region: 'india' },
+  { name: 'The Hindu Arts', url: 'https://www.thehindu.com/arts/feeder/default.rss', region: 'india' },
+  { name: 'The Hindu Society', url: 'https://www.thehindu.com/society/feeder/default.rss', region: 'india' },
+  { name: 'The Hindu Science', url: 'https://www.thehindu.com/sci-tech/science/feeder/default.rss', region: 'india' },
 ];
 
 const NEGATIVE_KEYWORDS = [
@@ -95,12 +97,14 @@ Snippet: ${snippet.slice(0, 300)}`,
 
 async function summarize(title, content) {
   return geminiCall(
-    `Write a warm, uplifting 2-sentence summary of this positive news story.
-Focus on the good, make it feel joyful and human. No clichés. Keep it under 60 words.
+    `Write a warm, uplifting 4-5 sentence summary of this positive news story.
+Write in a joyful, human, conversational tone. Highlight what makes this story special and why it matters.
+Include specific details that bring it to life. End with something hopeful or inspiring.
+No clichés, no filler phrases like "In conclusion" or "Overall".
 
 Title: ${title}
-Content: ${content.slice(0, 800)}`,
-    150
+Content: ${content.slice(0, 1200)}`,
+    350
   );
 }
 
