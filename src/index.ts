@@ -1328,7 +1328,7 @@ function renderHTML(feedItems: Item[], todayItems: Item[], activeTab: string, ac
         ${(() => {
           const summary = item.summary ?? '';
           const paragraphs = summary.split(/(?<=[.!?])\s+/).filter(s => s.trim()).map(s => `<p>${escapeHtml(s)}</p>`).join('');
-          const isLong = summary.length > 450;
+          const isLong = summary.length > 650;
           return isLong
             ? `<div class="summary-wrap" id="sw-${i}"><div class="story-summary">${paragraphs}</div></div>
         <button class="summary-toggle" data-wrap="sw-${i}" onclick="toggleSummary(this)">Show more</button>`
