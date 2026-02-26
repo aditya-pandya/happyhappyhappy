@@ -144,6 +144,14 @@ function stripHTML(html) {
 
 function decodeEntities(text) {
   return text
+    .replace(/&#(\d+);/g, (_, dec) => {
+      const n = Number.parseInt(dec, 10);
+      return Number.isFinite(n) ? String.fromCodePoint(n) : _;
+    })
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => {
+      const n = Number.parseInt(hex, 16);
+      return Number.isFinite(n) ? String.fromCodePoint(n) : _;
+    })
     .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"').replace(/&#039;/g, "'").replace(/&apos;/g, "'")
     .replace(/&nbsp;/g, ' ');
