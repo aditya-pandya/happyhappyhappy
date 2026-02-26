@@ -1325,10 +1325,15 @@ function renderHTML(feedItems: Item[], todayItems: Item[], activeTab: string, ac
       <div class="story-body">
         <span class="cat-tag">${escapeHtml(categoryLabel(item.category))}</span>
         <h2 class="story-title">${escapeHtml(item.title)}</h2>
-        <div class="summary-wrap" id="sw-${i}">
-          <div class="story-summary">${(item.summary ?? '').split(/(?<=[.!?])\s+/).filter(s => s.trim()).map(s => `<p>${escapeHtml(s)}</p>`).join('')}</div>
-        </div>
-        <button class="summary-toggle" data-wrap="sw-${i}" onclick="toggleSummary(this)" style="display:none">Show more</button>
+        ${(() => {
+          const summary = item.summary ?? '';
+          const paragraphs = summary.split(/(?<=[.!?])\s+/).filter(s => s.trim()).map(s => `<p>${escapeHtml(s)}</p>`).join('');
+          const isLong = summary.length > 450;
+          return isLong
+            ? `<div class="summary-wrap" id="sw-${i}"><div class="story-summary">${paragraphs}</div></div>
+        <button class="summary-toggle" data-wrap="sw-${i}" onclick="toggleSummary(this)">Show more</button>`
+            : `<div class="story-summary">${paragraphs}</div>`;
+        })()}
         <div class="story-foot">
           <span class="source-label">via ${escapeHtml(item.source)}</span>
           <div class="story-actions">
@@ -2557,13 +2562,6 @@ function renderHTML(feedItems: Item[], todayItems: Item[], activeTab: string, ac
     var isExpanded = wrap.classList.toggle('expanded');
     btn.textContent = isExpanded ? 'Show less' : 'Show more';
   };
-  // Initialize: show toggle buttons only when summary overflows
-  document.querySelectorAll('.summary-wrap').forEach(function(wrap) {
-    if (wrap.scrollHeight > wrap.clientHeight + 2) {
-      var btn = wrap.nextElementSibling;
-      if (btn && btn.classList.contains('summary-toggle')) btn.style.display = '';
-    }
-  });
 
   // ── Reader mode ──
   const overlay = document.getElementById('readerOverlay');
