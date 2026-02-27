@@ -1831,7 +1831,7 @@ function renderHTML(feedItems: Item[], todayItems: Item[], activeTab: string, ac
     .story-summary p { margin: 0 0 8px; }
     .story-summary p:last-child { margin-bottom: 0; }
     .summary-wrap {
-      max-height: 5.6em;
+      max-height: 14em;
       overflow: hidden;
       position: relative;
       margin-bottom: 8px;
